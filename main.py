@@ -1,166 +1,218 @@
 import pygame
 import random
 import sys
+from game_objects import Player, Bullet, Enemy, GameState, Explosion
 
-# Инициализация Pygame
-pygame.init()
 
-# Настройки экрана
-WIDTH, HEIGHT = 800, 600
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Космический захватчик")
+def main():
+    """Основная функция игры"""
+    
+    # Инициализация Pygame
+    pygame.init()
+    pygame.mixer.init()
 
-# Цвета
-BLACK = (0, 0, 0)
-WHITE = (255, 255, 255)
-GREEN = (0, 255, 0)
-RED = (255, 0, 0)
-BLUE = (0, 0, 255)
+    # Настройки экрана
+    WIDTH, HEIGHT = 800, 600
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption("Космический захватчик: Продвинутая версия")
 
-# Игрок
-player_width = 50
-player_height = 30
-player_x = WIDTH // 2 - player_width // 2
-player_y = HEIGHT - player_height - 20
-player_speed = 5
+    # Цвета
+    BLACK = (0, 0, 0)
+    WHITE = (255, 255, 255)
+    GREEN = (0, 255, 0)
+    RED = (255, 0, 0)
+    BLUE = (0, 0, 255)
 
-# Пули
-bullets = []
-bullet_speed = 7
-bullet_width = 5
-bullet_height = 15
-
-# Враги
-enemies = []
-enemy_width = 40
-enemy_height = 40
-enemy_speed = 2
-enemy_drop = 20
-enemy_spawn_rate = 30
-
-# Игровые переменные
-score = 0
-game_over = False
-clock = pygame.time.Clock()
-font = pygame.font.SysFont(None, 36)
-
-def draw_player(x, y):
-    pygame.draw.rect(screen, GREEN, (x, y, player_width, player_height))
-    # Нос корабля
-    pygame.draw.polygon(screen, GREEN, [(x + player_width // 2, y - 10), 
-                                        (x + 10, y), 
-                                        (x + player_width - 10, y)])
-
-def draw_bullet(x, y):
-    pygame.draw.rect(screen, WHITE, (x, y, bullet_width, bullet_height))
-
-def draw_enemy(x, y):
-    pygame.draw.rect(screen, RED, (x, y, enemy_width, enemy_height))
-    # Глаза врага
-    pygame.draw.circle(screen, BLACK, (x + 10, y + 15), 5)
-    pygame.draw.circle(screen, BLACK, (x + enemy_width - 10, y + 15), 5)
-
-def show_score():
-    score_text = font.render(f"Счет: {score}", True, WHITE)
-    screen.blit(score_text, (10, 10))
-
-def show_game_over():
-    game_over_text = font.render("ИГРА ОКОНЧЕНА! Нажмите R для рестарта", True, WHITE)
-    screen.blit(game_over_text, (WIDTH // 2 - 250, HEIGHT // 2))
-
-def reset_game():
-    global player_x, player_y, bullets, enemies, score, game_over
-    player_x = WIDTH // 2 - player_width // 2
-    player_y = HEIGHT - player_height - 20
+    # Игровые объекты
+    player = Player(WIDTH // 2 - 25, HEIGHT - 50)
     bullets = []
     enemies = []
-    score = 0
-    game_over = False
+    explosions = []
+    game_state = GameState()
 
-# Основной игровой цикл
-running = True
-while running:
-    screen.fill(BLACK)
-    
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_r and game_over:
-                reset_game()
-            if event.key == pygame.K_SPACE and not game_over:
-                # Создание новой пули
-                bullet_x = player_x + player_width // 2 - bullet_width // 2
-                bullet_y = player_y
-                bullets.append([bullet_x, bullet_y])
-    
-    if not game_over:
-        # Управление игроком
-        keys = pygame.key.get_pressed()
-        if keys[pygame.K_LEFT] and player_x > 0:
-            player_x -= player_speed
-        if keys[pygame.K_RIGHT] and player_x < WIDTH - player_width:
-            player_x += player_speed
+    # Игровые переменные
+    game_over = False
+    clock = pygame.time.Clock()
+    font = pygame.font.SysFont(None, 36)
+    big_font = pygame.font.SysFont(None, 72)
+    enemy_spawn_rate = 30
+    last_spawn_time = 0
+    spawn_interval = 1000  # миллисекунды
+
+    # Загрузка звуков
+    try:
+        shoot_sound = pygame.mixer.Sound('shoot.wav')
+        explosion_sound = pygame.mixer.Sound('explosion.wav')
+        game_over_sound = pygame.mixer.Sound('game_over.wav')
+    except FileNotFoundError:
+        # Создание заглушек, если файлы не найдены
+        shoot_sound = pygame.mixer.Sound(buffer=bytearray(100))
+        explosion_sound = pygame.mixer.Sound(buffer=bytearray(100))
+        game_over_sound = pygame.mixer.Sound(buffer=bytearray(100))
+
+    def spawn_enemy():
+        """Создание нового врага"""
+        enemy_x = random.randint(0, WIDTH - 40)
+        enemy_y = 0
+        enemies.append(Enemy(enemy_x, enemy_y))
+
+    def show_game_info():
+        """Отображение игровой информации"""
+        score_text = font.render(f"Счет: {game_state.score}", True, WHITE)
+        high_score_text = font.render(f"Рекорд: {game_state.high_score}", True, WHITE)
+        level_text = font.render(f"Уровень: {game_state.level}", True, WHITE)
         
-        # Движение пуль
-        for bullet in bullets[:]:
-            bullet[1] -= bullet_speed
-            if bullet[1] < 0:
-                bullets.remove(bullet)
+        screen.blit(score_text, (10, 10))
+        screen.blit(high_score_text, (10, 50))
+        screen.blit(level_text, (10, 90))
+
+    def show_game_over():
+        """Отображение экрана завершения игры"""
+        game_over_text = big_font.render("ИГРА ОКОНЧЕНА", True, RED)
+        restart_text = font.render("Нажмите R для рестарта", True, WHITE)
+        final_score_text = font.render(f"Финальный счет: {game_state.score}", True, WHITE)
         
-        # Создание врагов
-        if random.randint(1, enemy_spawn_rate) == 1:
-            enemy_x = random.randint(0, WIDTH - enemy_width)
-            enemy_y = 0
-            enemies.append([enemy_x, enemy_y])
+        screen.blit(game_over_text, (WIDTH // 2 - 150, HEIGHT // 2 - 100))
+        screen.blit(final_score_text, (WIDTH // 2 - 100, HEIGHT // 2))
+        screen.blit(restart_text, (WIDTH // 2 - 120, HEIGHT // 2 + 50))
+
+    def show_level_start():
+        """Отображение сообщения о начале уровня"""
+        level_text = big_font.render(f"Уровень {game_state.level}", True, GREEN)
+        screen.blit(level_text, (WIDTH // 2 - 100, HEIGHT // 2 - 50))
+        pygame.display.update()
+        pygame.time.delay(1500)
+
+    def reset_game():
+        """Сброс игры для начала заново"""
+        nonlocal bullets, enemies, explosions, game_over, enemy_spawn_rate, last_spawn_time
         
-        # Движение врагов
-        for enemy in enemies[:]:
-            enemy[1] += enemy_speed
-            
-            # Проверка столкновения врага с игроком
-            if (player_x < enemy[0] + enemy_width and
-                player_x + player_width > enemy[0] and
-                player_y < enemy[1] + enemy_height and
-                player_y + player_height > enemy[1]):
-                game_over = True
-            
-            # Проверка выхода за границы
-            if enemy[1] > HEIGHT:
-                enemies.remove(enemy)
-                score -= 10  # Штраф за пропущенного врага
-                if score < 0:
-                    score = 0
+        player.reset(WIDTH // 2 - 25, HEIGHT - 50)
+        bullets = []
+        enemies = []
+        explosions = []
+        game_over = False
+        enemy_spawn_rate = max(10, 30 - (game_state.level * 2))
+        last_spawn_time = pygame.time.get_ticks()
+        game_state.reset()
+        show_level_start()
+
+    def check_collisions():
+        """Проверка столкновений"""
+        nonlocal game_over
         
-        # Проверка столкновений пуль с врагами
+        # Столкновения пуль с врагами
         for bullet in bullets[:]:
             for enemy in enemies[:]:
-                if (bullet[0] < enemy[0] + enemy_width and
-                    bullet[0] + bullet_width > enemy[0] and
-                    bullet[1] < enemy[1] + enemy_height and
-                    bullet[1] + bullet_height > enemy[1]):
-                    
+                if bullet.rect.colliderect(enemy.rect):
+                    explosions.append(Explosion(
+                        enemy.x + enemy.width // 2, 
+                        enemy.y + enemy.height // 2
+                    ))
+                    explosion_sound.play()
                     bullets.remove(bullet)
                     enemies.remove(enemy)
-                    score += 100
+                    game_state.score += 100 * game_state.level
+                    
+                    # Проверка перехода на новый уровень
+                    if game_state.score >= game_state.level * 1000:
+                        game_state.increase_level()
+                        reset_game()
                     break
-    
-    # Отрисовка игровых объектов
-    draw_player(player_x, player_y)
-    
-    for bullet in bullets:
-        draw_bullet(bullet[0], bullet[1])
-    
-    for enemy in enemies:
-        draw_enemy(enemy[0], enemy[1])
-    
-    show_score()
-    
-    if game_over:
-        show_game_over()
-    
-    pygame.display.update()
-    clock.tick(60)
+        
+        # Столкновения игрока с врагами
+        for enemy in enemies[:]:
+            if player.rect.colliderect(enemy.rect) and not player.exploding:
+                player.explode()
+                explosions.append(Explosion(
+                    player.x + player.width // 2, 
+                    player.y + player.height // 2
+                ))
+                explosion_sound.play()
+                game_over_sound.play()
+                game_state.update_high_score()
+                game_over = True
+            
+            # Враги за пределами экрана
+            if enemy.y > HEIGHT:
+                enemies.remove(enemy)
+                game_state.score = max(0, game_state.score - 10)
 
-pygame.quit()
-sys.exit()
+    # Основной игровой цикл
+    running = True
+    show_level_start()
+
+    while running:
+        current_time = pygame.time.get_ticks()
+        
+        # Обработка событий
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_r and game_over:
+                    reset_game()
+                if event.key == pygame.K_SPACE and not game_over and not player.exploding:
+                    bullets.append(Bullet(player.x + player.width // 2 - 2, player.y))
+                    shoot_sound.play()
+        
+        # Создание врагов
+        if not game_over and current_time - last_spawn_time > spawn_interval:
+            if random.randint(1, enemy_spawn_rate) == 1:
+                spawn_enemy()
+                last_spawn_time = current_time
+        
+        # Обновление игровых объектов
+        if not game_over:
+            keys = pygame.key.get_pressed()
+            player.update(keys)
+            
+            for bullet in bullets[:]:
+                bullet.update()
+                if bullet.y < 0:
+                    bullets.remove(bullet)
+            
+            for enemy in enemies:
+                enemy.update()
+            
+            for explosion in explosions[:]:
+                explosion.update()
+                if explosion.is_complete():
+                    explosions.remove(explosion)
+            
+            check_collisions()
+        
+        # Отрисовка
+        screen.fill(BLACK)
+        
+        # Отрисовка звёздного фона
+        for _ in range(5):
+            x = random.randint(0, WIDTH)
+            y = random.randint(0, HEIGHT)
+            pygame.draw.circle(screen, WHITE, (x, y), 1)
+        
+        player.draw(screen)
+        
+        for bullet in bullets:
+            bullet.draw(screen)
+        
+        for enemy in enemies:
+            enemy.draw(screen)
+        
+        for explosion in explosions:
+            explosion.draw(screen)
+        
+        show_game_info()
+        
+        if game_over:
+            show_game_over()
+        
+        pygame.display.update()
+        clock.tick(60)
+
+    pygame.quit()
+    sys.exit()
+
+
+if __name__ == "__main__":
+    main()
